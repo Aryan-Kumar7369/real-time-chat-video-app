@@ -39,6 +39,20 @@ io.adapter(createAdapter(pubClient, subClient));
 io.on('connection', (socket) => {
     console.log(`New client connected: ${socket.id}`);
 
+    socket.on('send_message', (messageData, callback) => {
+    
+    console.log(`Message received from ${socket.id}:`, messageData.content);
+
+    
+    if (typeof callback === 'function') {
+      callback({
+        success: true,
+        message: "Successfully saved to server"
+      });
+      console.log(`Acknowledgment sent back to client for msg: ${messageData.client_msg_id}`);
+    }
+  });
+  
     socket.on('ping', () => {
         console.log(`Received ping from: ${socket.id}`);
         socket.emit('pong', {message: 'Hello from socket.io!'});

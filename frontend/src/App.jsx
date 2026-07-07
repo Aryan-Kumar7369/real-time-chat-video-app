@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { io } from 'socket.io-client'
+import ChatRoom from './components/ChatRoom';
+import { startSyncManager } from './services/syncManager';
 
 
 // Initialising socket connection for frontend
@@ -11,8 +13,12 @@ function App() {
   
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [pingResponse, setPingResponse] = useState('');
+  const [syncManager, setSyncManager] = useState(null);
 
   useEffect(() => {
+
+    const manager = startSyncManager(socket);
+    setSyncManager(manager);
 
     const onConnect = () => setIsConnected(true);
     const onDisconnect = () => setIsConnected(false);
@@ -44,19 +50,7 @@ function App() {
         </span>
       </div>
 
-      <button 
-        onClick={sendPing}
-        style={{ padding: '0.5rem 1rem', cursor: 'pointer' }}
-        disabled={!isConnected}
-      >
-        Send Ping to Server
-      </button>
-
-      {pingResponse && (
-        <div style={{ marginTop: '1rem', padding: '1rem', background: '#f0f0f0' }}>
-          <strong>Server says:</strong> {pingResponse}
-        </div>
-      )}
+      <ChatRoom syncManager={ syncManager } />
     </div>
   );
   
