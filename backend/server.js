@@ -94,6 +94,9 @@ io.on('connection', (socket) => {
                 console.log(`Acknowledgment sent back to client for msg: ${messageData.client_msg_id}`);
             }
 
+            socket.broadcast.emit('receive_message', messageData);
+            console.log(`Broadcasted msg to other clients: ${messageData.client_msg_id}`);
+
 
         } catch (error) {
 
