@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { io } from 'socket.io-client'
 import ChatRoom from './components/ChatRoom';
 import { startSyncManager } from './services/syncManager';
+import Auth from './components/Authenticate'
+import ChatDashboard from './components/ChatDashboard';
 
 
 // Initialising socket connection for frontend
@@ -14,6 +16,17 @@ function App() {
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [pingResponse, setPingResponse] = useState('');
   const [syncManager, setSyncManager] = useState(null);
+
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+
+  const handleLogin = (username) => {
+    // In the future, this will save a token to localStorage
+    setCurrentUser(username);
+    setIsAuthenticated(true);
+  };
+
+  
 
   useEffect(() => {
 
@@ -39,19 +52,13 @@ function App() {
     socket.emit('ping');
   };
 
-  return (
-    <div style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
-      <h1>Real-Time Chat Infrastructure Test</h1>
-      
-      <div style={{ marginBottom: '1rem' }}>
-        <strong>Status: </strong> 
-        <span style={{ color: isConnected ? 'green' : 'red' }}>
-          {isConnected ? '🟢 Connected to Server' : '🔴 Disconnected'}
-        </span>
-      </div>
+  // 1. If not logged in, show the beautiful Tailwind Auth screen
+  if (!isAuthenticated) {
+    return <Auth onAuthenticate={handleLogin} />;
+  }
 
-      <ChatRoom syncManager={ syncManager } />
-    </div>
+  return (
+    <ChatDashboard currentUser={currentUser} />
   );
   
 }
