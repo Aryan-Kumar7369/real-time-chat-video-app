@@ -76,7 +76,7 @@ export default function ChatDashboard({ currentUser }) {
     }
 
     const onEnterSendMsg = (e) => {
-        if(e.key === 'Enter') {
+        if (e.key === 'Enter') {
             sendMessage(e);
         }
     }
@@ -95,7 +95,17 @@ export default function ChatDashboard({ currentUser }) {
                         />
                         <span className="font-semibold text-gray-800">@{currentUser}</span>
                     </div>
-                    <div className="flex gap-4 text-gray-500">
+                    <div className="flex gap-4 items-center text-gray-500">
+                        {isConnected ?
+                            <div className='flex px-4 rounded-full border-2 transition-colors bg-green-50 text-green-600 items-center'>
+                                <span className='text-sm font-medium'>Online</span>
+                            </div>
+                            :
+                            <div className='flex px-4 rounded-full border-2 transition-colors bg-red-50 text-red-600 items-center'>
+                                <span className='text-sm font-medium'>Offline</span>
+                            </div>
+                        }
+
                         <MessageSquare className="w-5 h-5 cursor-pointer hover:text-gray-700" />
                         <MoreVertical className="w-5 h-5 cursor-pointer hover:text-gray-700" />
                     </div>
@@ -195,8 +205,8 @@ export default function ChatDashboard({ currentUser }) {
                         onKeyDown={onEnterSendMsg}
                         className="flex-1 bg-white border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
-                    <button className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 transition-colors cursor-pointer" 
-                    onClick={sendMessage}
+                    <button className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 transition-colors cursor-pointer"
+                        onClick={sendMessage}
                     >
                         <Send className="w-5 h-5 ml-0.5" />
                     </button>
