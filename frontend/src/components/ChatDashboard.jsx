@@ -3,7 +3,7 @@ import { startSyncManager } from '../services/syncManager';
 import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { io } from 'socket.io-client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 
 
@@ -18,6 +18,8 @@ export default function ChatDashboard({ currentUser }) {
     const [syncManager, setSyncManager] = useState(null);
 
     const [inputText, setInputText] = useState('');
+
+    const messagesScrollEndRef = useRef(null);
 
     useEffect(() => {
 
@@ -40,6 +42,10 @@ export default function ChatDashboard({ currentUser }) {
         () => db.messages.orderBy('created_at').toArray(),
         []
     )
+
+    useEffect(() => {
+        messagesScrollEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }, [messages])
 
     const formatMessageType = (timestamp) => {
         return new Date(timestamp).toLocaleTimeString('en-US', {
@@ -69,6 +75,11 @@ export default function ChatDashboard({ currentUser }) {
         syncManager?.processPendingMessages();
     }
 
+    const onEnterSendMsg = (e) => {
+        if(e.key === 'Enter') {
+            sendMessage(e);
+        }
+    }
 
     return (
         <div className="flex h-screen bg-gray-100 font-sans">
@@ -169,7 +180,8 @@ export default function ChatDashboard({ currentUser }) {
                             </div>
                     ))}
 
-                    {/* Mock Incoming Message */}
+                    {/* useRef for Scroling the messages screen to bottom */}
+                    <div ref={messagesScrollEndRef} />
 
                 </div>
 
@@ -180,9 +192,12 @@ export default function ChatDashboard({ currentUser }) {
                         placeholder="Type a message"
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
+                        onKeyDown={onEnterSendMsg}
                         className="flex-1 bg-white border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
-                    <button className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 transition-colors cursor-pointer" onClick={sendMessage}>
+                    <button className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 transition-colors cursor-pointer" 
+                    onClick={sendMessage}
+                    >
                         <Send className="w-5 h-5 ml-0.5" />
                     </button>
                 </div>
