@@ -1,7 +1,75 @@
-import { User, Lock, MessageSquare, UserCircle, ArrowRight, Search, MoreVertical, Video, Send } from 'lucide-react';
+import { User, Lock, MessageSquare, UserCircle, ArrowRight, Search, MoreVertical, Video, Send, CheckCheck, RefreshCw } from 'lucide-react';
+import { startSyncManager } from '../services/syncManager';
+import { db } from '../db/db';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { io } from 'socket.io-client'
+import { useState, useEffect } from 'react'
+
+
+
+// Initialising socket connection for frontend
+
+const socket = io('http://localhost:5000');
 
 
 export default function ChatDashboard({ currentUser }) {
+
+    const [isConnected, setIsConnected] = useState(socket.connected);
+    const [syncManager, setSyncManager] = useState(null);
+
+    const [inputText, setInputText] = useState('');
+
+    useEffect(() => {
+
+        const manager = startSyncManager(socket);
+        setSyncManager(manager);
+
+        const onConnect = () => setIsConnected(true);
+        const onDisconnect = () => setIsConnected(false);
+
+        socket.on('connect', onConnect);
+        socket.on('disconnect', onDisconnect);
+
+        return () => {
+            socket.off('connect', onConnect);
+            socket.off('disconnect', onDisconnect);
+        };
+    }, []);
+
+    const messages = useLiveQuery(
+        () => db.messages.orderBy('created_at').toArray(),
+        []
+    )
+
+    const formatMessageType = (timestamp) => {
+        return new Date(timestamp).toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+        })
+    }
+
+    const sendMessage = async (e) => {
+        e.preventDefault();
+
+        if (!inputText.trim()) return;
+
+        const newMessage = {
+            client_msg_id: crypto.randomUUID(),
+            client_username: currentUser,
+            conversation_id: 'global_room',
+            content: inputText,
+            sync_status: 'pending',
+            created_at: Date.now(),
+        }
+
+        await db.messages.put(newMessage);
+        setInputText('');
+
+        syncManager?.processPendingMessages();
+    }
+
+
     return (
         <div className="flex h-screen bg-gray-100 font-sans">
             {/* Sidebar - Chat List */}
@@ -77,21 +145,32 @@ export default function ChatDashboard({ currentUser }) {
 
                 {/* Messages Area */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                    {/* Mock Sent Message */}
-                    <div className="flex justify-end">
-                        <div className="bg-[#d9fdd3] text-gray-800 p-2.5 rounded-lg max-w-sm shadow-sm relative">
-                            <p className="text-sm">Hello! This is our gorgeous new dashboard.</p>
-                            <span className="text-[10px] text-gray-500 flex justify-end mt-1">12:31 PM</span>
-                        </div>
-                    </div>
+                    {/* Sent Message */}
+
+                    {messages?.map((msg) => (
+                        (msg.client_username === currentUser) ?
+                            <div key={msg.client_msg_id} className="flex justify-end">
+                                <div className="bg-[#d9fdd3] text-gray-800 p-2.5 rounded-lg max-w-sm shadow-sm relative">
+                                    <p className="text-sm">{msg.content}</p>
+                                    <div className='flex justify-end items-center gap-2'>
+                                        <span className="text-[10px] text-gray-500 flex justify-end mt-1">{formatMessageType(msg.created_at)}</span>
+                                        {msg.sync_status === 'pending' ? <RefreshCw className="w-4 h-4" /> : <CheckCheck className="w-5 h-5" />}
+                                    </div>
+
+                                </div>
+                            </div>
+                            :
+                            <div key={msg.client_msg_id} className="flex justify-start">
+                                <div className="bg-white text-gray-800 p-2.5 rounded-lg max-w-sm shadow-sm relative">
+                                    <p className="text-sm font-semibold text-blue-500 mb-1">@{msg.client_username}</p>
+                                    <p className="text-sm">{msg.content}</p>
+                                    <span className="text-[10px] text-gray-500 flex justify-end mt-1">{formatMessageType(msg.created_at)}</span>
+                                </div>
+                            </div>
+                    ))}
+
                     {/* Mock Incoming Message */}
-                    <div className="flex justify-start">
-                        <div className="bg-white text-gray-800 p-2.5 rounded-lg max-w-sm shadow-sm relative">
-                            <p className="text-sm font-semibold text-blue-500 mb-1">@JohnDoe</p>
-                            <p className="text-sm">Looks exactly like WhatsApp Web! Incredible.</p>
-                            <span className="text-[10px] text-gray-500 flex justify-end mt-1">12:32 PM</span>
-                        </div>
-                    </div>
+
                 </div>
 
                 {/* Input Area */}
@@ -99,9 +178,11 @@ export default function ChatDashboard({ currentUser }) {
                     <input
                         type="text"
                         placeholder="Type a message"
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
                         className="flex-1 bg-white border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
-                    <button className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 transition-colors">
+                    <button className="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 transition-colors cursor-pointer" onClick={sendMessage}>
                         <Send className="w-5 h-5 ml-0.5" />
                     </button>
                 </div>

@@ -37,13 +37,13 @@ export const startSyncManager = (socket) => {
   };
 
   if (socket.connected) {
-    console.log("⚡ Socket was already connected. Running initial sync...");
+    console.log("Socket is connected. Running initial sync...");
     processPendingMessages();
   }
 
   // 5. Listen for future reconnections
   socket.on('connect', () => {
-    console.log("🟢 Socket reconnected!");
+    console.log("Socket reconnected!");
     processPendingMessages();
   })
 

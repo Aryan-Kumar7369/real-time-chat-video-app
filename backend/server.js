@@ -110,10 +110,6 @@ io.on('connection', (socket) => {
 
     });
 
-    socket.on('ping', () => {
-        console.log(`Received ping from: ${socket.id}`);
-        socket.emit('pong', { message: 'Hello from socket.io!' });
-    });
 
     socket.on('disconnect', () => {
         console.log(`Client disconnected: ${socket.id}`);
