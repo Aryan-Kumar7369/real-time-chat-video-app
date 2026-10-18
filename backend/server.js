@@ -227,6 +227,124 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     }
 });
 
+// Search users by username or name for starting private chats
+app.get('/api/users/search', authenticateToken, async (req, res) => {
+    try {
+        const { q } = req.query;
+        if (!q || q.trim().length === 0) {
+            return res.json({ success: true, users: [] });
+        }
+
+        const queryPattern = `%${q.trim().toLowerCase()}%`;
+        const currentUsername = req.user.username.toLowerCase();
+
+        const result = await pool.query(
+            `SELECT id, username, name
+             FROM users
+             WHERE (LOWER(username) LIKE $1 OR LOWER(name) LIKE $1)
+               AND LOWER(username) != $2
+             ORDER BY username ASC
+             LIMIT 10;`,
+            [queryPattern, currentUsername]
+        );
+
+        return res.json({
+            success: true,
+            users: result.rows
+        });
+    } catch (err) {
+        console.error('User search error:', err);
+        return res.status(500).json({ success: false, message: 'Server error during user search' });
+    }
+});
+
+// Fetch active 1-on-1 conversations for the authenticated user
+app.get('/api/conversations', authenticateToken, async (req, res) => {
+    try {
+        const currentUsername = req.user.username.toLowerCase();
+
+        // Get latest message for each private conversation where the user is a participant
+        const result = await pool.query(
+            `SELECT m.*
+             FROM messages m
+             INNER JOIN (
+                 SELECT conversation_id, MAX(created_at) AS max_time
+                 FROM messages
+                 WHERE conversation_id LIKE 'dm:%'
+                   AND $1 = ANY(string_to_array(LOWER(conversation_id), ':'))
+                 GROUP BY conversation_id
+             ) latest ON m.conversation_id = latest.conversation_id AND m.created_at = latest.max_time
+             ORDER BY m.created_at DESC;`,
+            [currentUsername]
+        );
+
+        // Fetch user profiles for the chat participants
+        const conversations = await Promise.all(result.rows.map(async (row) => {
+            const parts = row.conversation_id.split(':');
+            const otherUsername = parts.find(p => p !== 'dm' && p.toLowerCase() !== currentUsername);
+
+            let otherUser = { username: otherUsername, name: otherUsername };
+            if (otherUsername) {
+                const userRes = await pool.query(
+                    'SELECT id, username, name FROM users WHERE LOWER(username) = LOWER($1)',
+                    [otherUsername]
+                );
+                if (userRes.rows.length > 0) {
+                    otherUser = userRes.rows[0];
+                }
+            }
+
+            return {
+                conversation_id: row.conversation_id,
+                participant: otherUser,
+                last_message: row.content,
+                updated_at: row.created_at
+            };
+        }));
+
+        return res.json({
+            success: true,
+            conversations
+        });
+    } catch (err) {
+        console.error('Fetch conversations error:', err);
+        return res.status(500).json({ success: false, message: 'Server error fetching conversations' });
+    }
+});
+
+// Fetch historical messages for a specific conversation (protected)
+app.get('/api/messages/:conversationId', authenticateToken, async (req, res) => {
+    try {
+        const { conversationId } = req.params;
+        const currentUsername = req.user.username.toLowerCase();
+
+        // Ensure user is an authorized participant in the conversation
+        if (conversationId.startsWith('dm:')) {
+            const parts = conversationId.split(':');
+            const isParticipant = parts.some(p => p.toLowerCase() === currentUsername);
+            if (!isParticipant) {
+                return res.status(403).json({ success: false, message: 'Access denied: You are not a member of this chat' });
+            }
+        }
+
+        const result = await pool.query(
+            `SELECT client_msg_id, conversation_id, sender_username, content, created_at
+             FROM messages
+             WHERE conversation_id = $1
+             ORDER BY created_at ASC;`,
+            [conversationId]
+        );
+
+        return res.json({
+            success: true,
+            messages: result.rows
+        });
+    } catch (err) {
+        console.error('Fetch messages error:', err);
+        return res.status(500).json({ success: false, message: 'Server error fetching messages' });
+    }
+});
+
 // ---------------- SOCKET.IO SETUP ----------------
 
 const io = new Server(server, {
@@ -235,11 +353,6 @@ const io = new Server(server, {
         methods: ["GET", "POST"]
     }
 });
-
-// Setting up Redis publisher and subscriber (optional / scalable)
-// const pubClient = new Redis({ host: 'localhost', port: 6379 });
-// const subClient = pubClient.duplicate();
-// io.adapter(createAdapter(pubClient, subClient));
 
 // Socket.IO JWT Authentication Middleware
 io.use((socket, next) => {
@@ -260,17 +373,28 @@ io.use((socket, next) => {
 
 // Listening for connections
 io.on('connection', (socket) => {
-    const authenticatedUsername = socket.user?.username || 'unknown';
-    console.log(`Authenticated client connected: ${socket.id} (@${authenticatedUsername})`);
+    const authenticatedUsername = (socket.user?.username || 'unknown').toLowerCase();
+    const userRoom = `user:${authenticatedUsername}`;
+    
+    // Each user joins their private user room for targeted 1-on-1 message delivery
+    socket.join(userRoom);
+    console.log(`Authenticated client connected: ${socket.id} (@${authenticatedUsername}) joined room ${userRoom}`);
 
     socket.on('send_message', async (messageData, callback) => {
-        // Enforce the sender's username from the verified token to prevent identity spoofing
+        // Enforce the sender's username from verified token
         const enrichedMessage = {
             ...messageData,
             client_username: authenticatedUsername
         };
 
-        console.log(`Message received from @${authenticatedUsername}:`, enrichedMessage.content);
+        // Determine the private recipient username
+        let recipient = messageData.recipient_username?.toLowerCase();
+        if (!recipient && messageData.conversation_id?.startsWith('dm:')) {
+            const parts = messageData.conversation_id.split(':');
+            recipient = parts.find(p => p !== 'dm' && p.toLowerCase() !== authenticatedUsername);
+        }
+
+        console.log(`Private message from @${authenticatedUsername} to @${recipient || 'unknown'}:`, enrichedMessage.content);
 
         try {
             await pool.query(
@@ -293,11 +417,15 @@ io.on('connection', (socket) => {
                     success: true,
                     message: "Successfully saved to server"
                 });
-                console.log(`Acknowledgment sent back to client for msg: ${enrichedMessage.client_msg_id}`);
             }
 
-            socket.broadcast.emit('receive_message', enrichedMessage);
-            console.log(`Broadcasted msg to other clients: ${enrichedMessage.client_msg_id}`);
+            // Route ONLY to recipient's private user room (not broadcast!)
+            if (recipient) {
+                io.to(`user:${recipient}`).emit('receive_message', enrichedMessage);
+            }
+
+            // Echo to sender's other connected tabs/devices (excluding the originating socket)
+            socket.to(userRoom).emit('receive_message', enrichedMessage);
 
         } catch (error) {
             console.error("Database Error:", error);
