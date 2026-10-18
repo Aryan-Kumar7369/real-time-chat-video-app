@@ -1,18 +1,20 @@
-import { User, Lock, MessageSquare, UserCircle, ArrowRight, Search, MoreVertical, Video, Send, CheckCheck, RefreshCw } from 'lucide-react';
+import { User, Lock, MessageSquare, UserCircle, ArrowRight, Search, MoreVertical, Video, Send, CheckCheck, RefreshCw, LogOut } from 'lucide-react';
 import { startSyncManager } from '../services/syncManager';
 import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { io } from 'socket.io-client'
-import { useState, useEffect, useRef } from 'react'
+import { io } from 'socket.io-client';
+import { useState, useEffect, useRef } from 'react';
+import { authService } from '../services/authentication';
 
+// Initialising socket connection with dynamic JWT auth token
+const socket = io('http://localhost:5000', {
+    autoConnect: false,
+    auth: (cb) => {
+        cb({ token: authService.getToken() });
+    }
+});
 
-
-// Initialising socket connection for frontend
-
-const socket = io('http://localhost:5000');
-
-
-export default function ChatDashboard({ currentUser }) {
+export default function ChatDashboard({ currentUser, userData, onLogout }) {
 
     const [isConnected, setIsConnected] = useState(socket.connected);
     const [syncManager, setSyncManager] = useState(null);
@@ -22,19 +24,29 @@ export default function ChatDashboard({ currentUser }) {
     const messagesScrollEndRef = useRef(null);
 
     useEffect(() => {
+        // Connect socket when component mounts with active token
+        if (!socket.connected) {
+            socket.connect();
+        }
 
         const manager = startSyncManager(socket);
         setSyncManager(manager);
 
         const onConnect = () => setIsConnected(true);
         const onDisconnect = () => setIsConnected(false);
+        const onConnectError = (err) => {
+            console.error("Socket authentication error:", err.message);
+            setIsConnected(false);
+        };
 
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
+        socket.on('connect_error', onConnectError);
 
         return () => {
             socket.off('connect', onConnect);
             socket.off('disconnect', onDisconnect);
+            socket.off('connect_error', onConnectError);
         };
     }, []);
 
@@ -79,7 +91,12 @@ export default function ChatDashboard({ currentUser }) {
         if (e.key === 'Enter') {
             sendMessage(e);
         }
-    }
+    };
+
+    const handleLogoutClick = () => {
+        socket.disconnect();
+        onLogout();
+    };
 
     return (
         <div className="flex h-screen bg-gray-100 font-sans">
@@ -93,21 +110,31 @@ export default function ChatDashboard({ currentUser }) {
                             alt="avatar"
                             className="w-10 h-10 rounded-full bg-gray-200"
                         />
-                        <span className="font-semibold text-gray-800">@{currentUser}</span>
+                        <div className="flex flex-col">
+                            {userData?.name && (
+                                <span className="text-sm font-semibold text-gray-900 leading-tight">{userData.name}</span>
+                            )}
+                            <span className="text-xs text-gray-500 font-medium">@{currentUser}</span>
+                        </div>
                     </div>
-                    <div className="flex gap-4 items-center text-gray-500">
+                    <div className="flex gap-3 items-center text-gray-500">
                         {isConnected ?
-                            <div className='flex px-4 rounded-full border-2 transition-colors bg-green-50 text-green-600 items-center'>
-                                <span className='text-sm font-medium'>Online</span>
+                            <div className='flex px-3 py-0.5 rounded-full border transition-colors bg-green-50 text-green-600 border-green-200 items-center'>
+                                <span className='text-xs font-medium'>Online</span>
                             </div>
                             :
-                            <div className='flex px-4 rounded-full border-2 transition-colors bg-red-50 text-red-600 items-center'>
-                                <span className='text-sm font-medium'>Offline</span>
+                            <div className='flex px-3 py-0.5 rounded-full border transition-colors bg-red-50 text-red-600 border-red-200 items-center'>
+                                <span className='text-xs font-medium'>Offline</span>
                             </div>
                         }
 
-                        <MessageSquare className="w-5 h-5 cursor-pointer hover:text-gray-700" />
-                        <MoreVertical className="w-5 h-5 cursor-pointer hover:text-gray-700" />
+                        <button
+                            onClick={handleLogoutClick}
+                            className="p-1 hover:text-red-600 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
+                            title="Log Out"
+                        >
+                            <LogOut className="w-5 h-5" />
+                        </button>
                     </div>
                 </div>
 

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { User, Lock, MessageSquare, UserCircle, ArrowRight } from 'lucide-react';
-
-
+import { User, Lock, MessageSquare, UserCircle, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
+import { authService } from '../services/authentication';
 
 export default function Auth({ onAuthenticate }) {
     const [isLogin, setIsLogin] = useState(true);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
 
     const [formData, setFormData] = useState({
         name: '',
@@ -14,12 +15,54 @@ export default function Auth({ onAuthenticate }) {
 
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
+        if (error) setError('');
     };
 
-    const handleSubmit = (e) => {
+    const toggleMode = () => {
+        setIsLogin(!isLogin);
+        setError('');
+    };
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        console.log("Authenticating with:", formData);
-        onAuthenticate(formData.username);
+        setError('');
+
+        const username = formData.username.trim();
+        if (username.length < 3) {
+            setError('Username must be at least 3 characters');
+            return;
+        }
+
+        if (formData.password.length < 6) {
+            setError('Password must be at least 6 characters');
+            return;
+        }
+
+        setIsLoading(true);
+
+        try {
+            let result;
+            if (isLogin) {
+                result = await authService.login({
+                    username,
+                    password: formData.password
+                });
+            } else {
+                result = await authService.signup({
+                    name: formData.name.trim(),
+                    username,
+                    password: formData.password
+                });
+            }
+
+            if (result && result.user && result.token) {
+                onAuthenticate(result.user, result.token);
+            }
+        } catch (err) {
+            setError(err.message || 'Authentication failed. Please try again.');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -33,11 +76,18 @@ export default function Auth({ onAuthenticate }) {
                         {isLogin ? 'Welcome Back' : 'Create an Account'}
                     </h2>
                     <p className="text-blue-100 text-sm">
-                        {isLogin ? 'Enter your details to access your chats.' : 'Start chatting with your friends today.'}
+                        {isLogin ? 'Enter your credentials to access your chats.' : 'Choose a unique username and start chatting.'}
                     </p>
                 </div>
 
                 <div className="p-8">
+                    {error && (
+                        <div className="mb-5 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 shrink-0" />
+                            <span>{error}</span>
+                        </div>
+                    )}
+
                     <form onSubmit={handleSubmit} className="space-y-5">
                         {!isLogin && (
                             <div>
@@ -54,6 +104,7 @@ export default function Auth({ onAuthenticate }) {
                                         className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all"
                                         placeholder="John Doe"
                                         required={!isLogin}
+                                        disabled={isLoading}
                                     />
                                 </div>
                             </div>
@@ -73,6 +124,8 @@ export default function Auth({ onAuthenticate }) {
                                     className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all"
                                     placeholder="johndoe123"
                                     required
+                                    disabled={isLoading}
+                                    autoCapitalize="none"
                                 />
                             </div>
                         </div>
@@ -91,16 +144,27 @@ export default function Auth({ onAuthenticate }) {
                                     className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all"
                                     placeholder="••••••••"
                                     required
+                                    disabled={isLoading}
                                 />
                             </div>
                         </div>
 
                         <button
                             type="submit"
-                            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors focus:ring-4 focus:ring-blue-200 outline-none"
+                            disabled={isLoading}
+                            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors focus:ring-4 focus:ring-blue-200 outline-none cursor-pointer"
                         >
-                            {isLogin ? 'Sign In' : 'Sign Up'}
-                            <ArrowRight className="w-4 h-4" />
+                            {isLoading ? (
+                                <>
+                                    <Loader2 className="w-5 h-5 animate-spin" />
+                                    <span>{isLogin ? 'Signing In...' : 'Creating Account...'}</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span>{isLogin ? 'Sign In' : 'Sign Up'}</span>
+                                    <ArrowRight className="w-4 h-4" />
+                                </>
+                            )}
                         </button>
                     </form>
 
@@ -108,8 +172,9 @@ export default function Auth({ onAuthenticate }) {
                         {isLogin ? "Don't have an account? " : "Already have an account? "}
                         <button
                             type="button"
-                            onClick={() => setIsLogin(!isLogin)}
-                            className="font-semibold text-blue-600 hover:text-blue-800 transition-colors"
+                            onClick={toggleMode}
+                            disabled={isLoading}
+                            className="font-semibold text-blue-600 hover:text-blue-800 transition-colors cursor-pointer"
                         >
                             {isLogin ? 'Sign up' : 'Sign in'}
                         </button>
@@ -118,5 +183,4 @@ export default function Auth({ onAuthenticate }) {
             </div>
         </div>
     );
-
 }
