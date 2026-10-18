@@ -12,8 +12,9 @@ import { authService } from '../services/authentication';
 import { chatService } from '../services/chatService';
 import { encryptForStorage, decryptFromStorage } from '../utils/crypto';
 
-// Initialising socket connection with dynamic JWT auth token
-const socket = io('http://localhost:5000', {
+// Initialising socket connection with dynamic JWT auth token and cloud backend URL
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000').replace(/\/$/, '');
+const socket = io(BACKEND_URL, {
     autoConnect: false,
     auth: (cb) => {
         cb({ token: authService.getToken() });

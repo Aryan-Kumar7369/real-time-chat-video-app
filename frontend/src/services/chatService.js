@@ -1,6 +1,7 @@
 import { authService } from './authentication';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000').replace(/\/$/, '');
+const API_BASE_URL = `${BACKEND_URL}/api`;
 
 export const chatService = {
     // Generate deterministic 1-on-1 private room ID

@@ -1,6 +1,7 @@
 import { db } from '../db/db';
 
-const API_URL = 'http://localhost:5000/api/auth';
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000').replace(/\/$/, '');
+const API_URL = `${BACKEND_URL}/api/auth`;
 
 const TOKEN_KEY = 'chat_app_jwt_token';
 const USER_KEY = 'chat_app_user';

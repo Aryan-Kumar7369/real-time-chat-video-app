@@ -12,9 +12,28 @@ import 'dotenv/config';
 
 const { Pool } = pg;
 
+const allowedOrigins = process.env.CLIENT_URL
+    ? process.env.CLIENT_URL.split(',').map(url => url.trim().replace(/\/$/, ''))
+    : ['http://localhost:5173', 'http://127.0.0.1:5173'];
+
+const corsOriginHandler = (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        return callback(null, true);
+    }
+    // Allow vercel preview deployments
+    if (origin.endsWith('.vercel.app')) {
+        return callback(null, true);
+    }
+    return callback(null, true);
+};
+
 // Initialising express and http
 const app = express();
-app.use(cors());
+app.use(cors({
+    origin: corsOriginHandler,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
 app.use(express.json());
 const server = http.createServer(app);
 
@@ -63,13 +82,23 @@ const decryptAtRest = (cipherText) => {
     }
 };
 
-const pool = new Pool({
-    user: process.env.DB_USER,
-    host: 'localhost', // Connects to the port mapped by your Docker container
-    database: process.env.DB_NAME,
-    password: process.env.DB_PASSWORD,
-    port: process.env.DB_PORT,
-});
+// Connect to cloud PostgreSQL (via DATABASE_URL) or local Docker Postgres (via DB_* vars)
+const poolConfig = process.env.DATABASE_URL
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.DATABASE_URL.includes('localhost')
+            ? false
+            : { rejectUnauthorized: false }
+      }
+    : {
+        user: process.env.DB_USER,
+        host: process.env.DB_HOST || 'localhost',
+        database: process.env.DB_NAME,
+        password: process.env.DB_PASSWORD,
+        port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 5432,
+      };
+
+const pool = new Pool(poolConfig);
 
 // Initialise Database Tables
 const initDb = async () => {
@@ -428,8 +457,9 @@ app.get('/api/messages/sync-all', authenticateToken, async (req, res) => {
 
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:5173",
-        methods: ["GET", "POST"]
+        origin: corsOriginHandler,
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 
@@ -528,7 +558,15 @@ server.listen(PORT, () => {
     console.log(`Server started at port ${PORT}`);
 });
 
-// Health check endpoint
+// Health check endpoints for cloud monitoring (Render, Koyeb, etc.)
 app.get('/', (req, res) => {
-    res.send('Server is running!');
+    res.json({
+        status: 'online',
+        service: 'Real-Time Chat App Backend',
+        timestamp: new Date().toISOString()
+    });
+});
+
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'healthy' });
 });
