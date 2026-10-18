@@ -227,7 +227,7 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     }
 });
 
-// Search users by username or name for starting private chats
+// Search user by EXACT username only (prevents exposing or browsing other users)
 app.get('/api/users/search', authenticateToken, async (req, res) => {
     try {
         const { q } = req.query;
@@ -235,17 +235,21 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
             return res.json({ success: true, users: [] });
         }
 
-        const queryPattern = `%${q.trim().toLowerCase()}%`;
+        // Clean query: strip optional leading '@', trim, and lowercase
+        const exactUsername = q.trim().replace(/^@/, '').toLowerCase();
         const currentUsername = req.user.username.toLowerCase();
 
+        if (exactUsername.length === 0) {
+            return res.json({ success: true, users: [] });
+        }
+
+        // Strict exact match on username only, cannot match self
         const result = await pool.query(
             `SELECT id, username, name
              FROM users
-             WHERE (LOWER(username) LIKE $1 OR LOWER(name) LIKE $1)
-               AND LOWER(username) != $2
-             ORDER BY username ASC
-             LIMIT 10;`,
-            [queryPattern, currentUsername]
+             WHERE LOWER(username) = $1
+               AND LOWER(username) != $2;`,
+            [exactUsername, currentUsername]
         );
 
         return res.json({

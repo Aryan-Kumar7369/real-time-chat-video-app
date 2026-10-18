@@ -136,9 +136,10 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
         messagesScrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    // Handle user search debounce
-    useEffect(() => {
-        if (!searchQuery.trim()) {
+    // Search user by exact username
+    const executeSearch = async (query) => {
+        const cleaned = query.trim().replace(/^@/, '');
+        if (!cleaned) {
             setSearchResults([]);
             setIsSearching(false);
             setShowSearchDropdown(false);
@@ -148,17 +149,33 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
         setIsSearching(true);
         setShowSearchDropdown(true);
 
-        const debounceTimer = setTimeout(async () => {
-            try {
-                const results = await chatService.searchUsers(searchQuery);
-                setSearchResults(results);
-            } catch (err) {
-                console.error("User search failed:", err);
-                setSearchResults([]);
-            } finally {
-                setIsSearching(false);
-            }
-        }, 300);
+        try {
+            const results = await chatService.searchUsers(cleaned);
+            setSearchResults(results);
+        } catch (err) {
+            console.error("User search failed:", err);
+            setSearchResults([]);
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    // Handle user search debounce
+    useEffect(() => {
+        const cleaned = searchQuery.trim().replace(/^@/, '');
+        if (!cleaned) {
+            setSearchResults([]);
+            setIsSearching(false);
+            setShowSearchDropdown(false);
+            return;
+        }
+
+        setShowSearchDropdown(true);
+        setIsSearching(true);
+
+        const debounceTimer = setTimeout(() => {
+            executeSearch(cleaned);
+        }, 400);
 
         return () => clearTimeout(debounceTimer);
     }, [searchQuery]);
@@ -301,9 +318,15 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
                         <Search className="w-5 h-5 absolute left-3 top-2.5 text-gray-400" />
                         <input
                             type="text"
-                            placeholder="Search friend by username..."
+                            placeholder="Enter exact @username..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    executeSearch(searchQuery);
+                                }
+                            }}
                             onFocus={() => {
                                 if (searchQuery.trim()) setShowSearchDropdown(true);
                             }}
@@ -327,11 +350,11 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
                     {showSearchDropdown && (
                         <div className="absolute left-3 right-3 top-14 bg-white rounded-xl shadow-xl border border-gray-200 z-50 max-h-72 overflow-y-auto">
                             <div className="p-2 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                                {isSearching ? 'Searching...' : 'Search Results'}
+                                {isSearching ? 'Checking username...' : 'Exact Username Match'}
                             </div>
 
                             {isSearching ? (
-                                <div className="p-4 text-center text-sm text-gray-500">Searching users...</div>
+                                <div className="p-4 text-center text-sm text-gray-500">Verifying username...</div>
                             ) : searchResults.length > 0 ? (
                                 searchResults.map((user) => (
                                     <div
@@ -360,7 +383,10 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
                                 ))
                             ) : (
                                 <div className="p-4 text-center text-sm text-gray-500">
-                                    No users found with username &quot;{searchQuery}&quot;
+                                    <p className="font-medium text-gray-700">No user found</p>
+                                    <p className="text-xs text-gray-400 mt-1">
+                                        Full username must match exactly (e.g. &quot;@{searchQuery.trim().replace(/^@/, '')}&quot;)
+                                    </p>
                                 </div>
                             )}
                         </div>
