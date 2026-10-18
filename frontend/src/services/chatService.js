@@ -66,5 +66,25 @@ export const chatService = {
         }
 
         return data.messages || [];
+    },
+
+    // Fetch all user messages across all conversations (for complete session restoration on login)
+    async syncAllMessages() {
+        const token = authService.getToken();
+        if (!token) throw new Error('Not authenticated');
+
+        const response = await fetch(`${API_BASE_URL}/messages/sync-all`, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.message || 'Failed to sync messages');
+        }
+
+        return data.messages || [];
     }
 };

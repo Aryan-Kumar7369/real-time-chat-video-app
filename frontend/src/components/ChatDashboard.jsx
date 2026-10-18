@@ -10,6 +10,7 @@ import { io } from 'socket.io-client';
 import { useState, useEffect, useRef } from 'react';
 import { authService } from '../services/authentication';
 import { chatService } from '../services/chatService';
+import { encryptForStorage, decryptFromStorage } from '../utils/crypto';
 
 // Initialising socket connection with dynamic JWT auth token
 const socket = io('http://localhost:5000', {
@@ -50,6 +51,9 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
         const onConnectError = (err) => {
             console.error("Socket connection error:", err.message);
             setIsConnected(false);
+            if (err.message && err.message.toLowerCase().includes('auth')) {
+                onLogout();
+            }
         };
 
         socket.on('connect', onConnect);
@@ -63,10 +67,11 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
         };
     }, []);
 
-    // Initial load: sync existing conversations from backend to Dexie
+    // Initial load: restore conversations & entire past message history securely from server into encrypted local Dexie
     useEffect(() => {
-        const loadPastConversations = async () => {
+        const restoreChatsFromServer = async () => {
             try {
+                // 1. Fetch conversations
                 const serverConvs = await chatService.getUserConversations();
                 if (serverConvs && serverConvs.length > 0) {
                     for (const conv of serverConvs) {
@@ -74,17 +79,32 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
                             conversation_id: conv.conversation_id,
                             participant_username: conv.participant.username,
                             participant_name: conv.participant.name || conv.participant.username,
-                            last_message: conv.last_message,
+                            last_message: encryptForStorage(conv.last_message),
                             updated_at: conv.updated_at
                         });
                     }
                 }
+
+                // 2. Fetch all past messages for all conversations involving the user
+                const allMessages = await chatService.syncAllMessages();
+                if (allMessages && allMessages.length > 0) {
+                    for (const m of allMessages) {
+                        await db.messages.put({
+                            client_msg_id: m.client_msg_id,
+                            conversation_id: m.conversation_id,
+                            client_username: m.sender_username,
+                            content: encryptForStorage(m.content),
+                            created_at: Number(m.created_at),
+                            sync_status: 'synced'
+                        });
+                    }
+                }
             } catch (err) {
-                console.warn("Could not sync server conversations (offline or initial):", err.message);
+                console.warn("Could not sync server history (offline or initial):", err.message);
             }
         };
 
-        loadPastConversations();
+        restoreChatsFromServer();
     }, []);
 
     // Fetch conversation message history from server when an active conversation is opened
@@ -95,16 +115,16 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
             try {
                 const history = await chatService.getConversationMessages(activeConversation.conversationId);
                 if (history && history.length > 0) {
-                    await db.messages.bulkPut(
-                        history.map((m) => ({
+                    for (const m of history) {
+                        await db.messages.put({
                             client_msg_id: m.client_msg_id,
                             conversation_id: m.conversation_id,
                             client_username: m.sender_username,
-                            content: m.content,
+                            content: encryptForStorage(m.content),
                             created_at: Number(m.created_at),
                             sync_status: 'synced'
-                        }))
-                    );
+                        });
+                    }
                 }
             } catch (err) {
                 console.warn("Could not sync message history from server:", err.message);
@@ -200,7 +220,7 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
             conversation_id: convId,
             participant_username: targetUser.username,
             participant_name: targetUser.name || targetUser.username,
-            last_message: 'Started private chat',
+            last_message: encryptForStorage('Started private chat'),
             updated_at: Date.now()
         });
 
@@ -233,25 +253,27 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
         if (!inputText.trim() || !activeConversation) return;
 
         const timestamp = Date.now();
+        const encryptedContent = encryptForStorage(inputText.trim());
+
         const newMessage = {
             client_msg_id: crypto.randomUUID(),
             client_username: currentUser,
             recipient_username: activeConversation.participant.username,
             conversation_id: activeConversation.conversationId,
-            content: inputText.trim(),
+            content: encryptedContent,
             sync_status: 'pending',
             created_at: timestamp,
         };
 
-        // Save locally first for instant offline reactivity
+        // Save locally first for instant offline reactivity (encrypted in IndexedDB)
         await db.messages.put(newMessage);
 
-        // Update local conversation preview
+        // Update local conversation preview (encrypted in IndexedDB)
         await db.conversations.put({
             conversation_id: activeConversation.conversationId,
             participant_username: activeConversation.participant.username,
             participant_name: activeConversation.participant.name,
-            last_message: inputText.trim(),
+            last_message: encryptedContent,
             updated_at: timestamp
         });
 
@@ -265,9 +287,9 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
         }
     };
 
-    const handleLogoutClick = () => {
+    const handleLogoutClick = async () => {
         socket.disconnect();
-        onLogout();
+        await onLogout();
     };
 
     return (
@@ -434,7 +456,7 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
                                             @{conv.participant_username}
                                         </p>
                                         <p className="text-xs text-gray-500 truncate">
-                                            {conv.last_message || 'No messages yet'}
+                                            {decryptFromStorage(conv.last_message) || 'No messages yet'}
                                         </p>
                                     </div>
                                 </div>
@@ -497,7 +519,7 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
                                     msg.client_username === currentUser ? (
                                         <div key={msg.client_msg_id} className="flex justify-end">
                                             <div className="bg-[#d9fdd3] text-gray-800 p-2.5 rounded-lg max-w-sm shadow-sm relative">
-                                                <p className="text-sm break-words">{msg.content}</p>
+                                                <p className="text-sm break-words">{decryptFromStorage(msg.content)}</p>
                                                 <div className="flex justify-end items-center gap-1.5 mt-1">
                                                     <span className="text-[10px] text-gray-500">
                                                         {formatMessageType(msg.created_at)}
@@ -513,7 +535,7 @@ export default function ChatDashboard({ currentUser, userData, onLogout }) {
                                     ) : (
                                         <div key={msg.client_msg_id} className="flex justify-start">
                                             <div className="bg-white text-gray-800 p-2.5 rounded-lg max-w-sm shadow-sm relative">
-                                                <p className="text-sm break-words">{msg.content}</p>
+                                                <p className="text-sm break-words">{decryptFromStorage(msg.content)}</p>
                                                 <span className="text-[10px] text-gray-500 flex justify-end mt-1">
                                                     {formatMessageType(msg.created_at)}
                                                 </span>

@@ -1,3 +1,5 @@
+import { db } from '../db/db';
+
 const API_URL = 'http://localhost:5000/api/auth';
 
 const TOKEN_KEY = 'chat_app_jwt_token';
@@ -33,9 +35,18 @@ export const authService = {
         }
     },
 
-    logout() {
+    // Completely wipe all local session data and local IndexedDB database
+    async logout() {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
+
+        try {
+            await db.messages.clear();
+            await db.conversations.clear();
+            console.log("Local IndexedDB wiped completely.");
+        } catch (err) {
+            console.warn("Error clearing IndexedDB on logout:", err);
+        }
     },
 
     async signup({ username, name, password }) {
@@ -93,7 +104,7 @@ export const authService = {
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-            this.logout();
+            await this.logout();
             throw new Error(data.message || 'Token verification failed');
         }
 

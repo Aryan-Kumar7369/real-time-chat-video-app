@@ -35,7 +35,8 @@ function App() {
         }
       } catch (err) {
         console.warn("Session expired or invalid token:", err.message);
-        authService.logout();
+        // Wipe local IndexedDB and localStorage on token expiry
+        await authService.logout();
         setIsAuthenticated(false);
         setCurrentUser(null);
         setUserData(null);
@@ -53,8 +54,9 @@ function App() {
     setIsAuthenticated(true);
   };
 
-  const handleLogout = () => {
-    authService.logout();
+  const handleLogout = async () => {
+    // Completely wipe all local data in IndexedDB and localStorage
+    await authService.logout();
     setIsAuthenticated(false);
     setCurrentUser(null);
     setUserData(null);
@@ -64,7 +66,7 @@ function App() {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center font-sans">
         <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-3" />
-        <p className="text-gray-500 text-sm">Loading your chats...</p>
+        <p className="text-gray-500 text-sm">Loading secure session...</p>
       </div>
     );
   }

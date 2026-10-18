@@ -1,4 +1,5 @@
 import { db } from '../db/db';
+import { encryptForStorage, decryptFromStorage } from '../utils/crypto';
 
 export const startSyncManager = (socket) => {
 
@@ -13,7 +14,15 @@ export const startSyncManager = (socket) => {
       console.log(`Attempting to sync ${pendingMessages.length} pending messages...`);
 
       for (const msg of pendingMessages) {
-        socket.emit('send_message', msg, async (serverResponse) => {
+        // Decrypt the locally encrypted content before transmitting over the secure socket
+        const plainContent = decryptFromStorage(msg.content);
+
+        const payload = {
+          ...msg,
+          content: plainContent
+        };
+
+        socket.emit('send_message', payload, async (serverResponse) => {
           if (serverResponse && serverResponse.success) {
             await db.messages.update(msg.client_msg_id, {
               sync_status: 'synced'
@@ -40,14 +49,18 @@ export const startSyncManager = (socket) => {
 
   // Listen for incoming private messages
   socket.on('receive_message', async (incomingMsg) => {
-    console.log("Received new message from server:", incomingMsg.content);
+    console.log("Received new private message from server");
     try {
+      // Encrypt before saving to IndexedDB so DevTools inspector never sees plain text
+      const encryptedContent = encryptForStorage(incomingMsg.content);
+
       await db.messages.put({
         ...incomingMsg,
+        content: encryptedContent,
         sync_status: 'synced'
       });
 
-      // Update conversations list in Dexie
+      // Update conversations list in Dexie with encrypted preview
       if (incomingMsg.conversation_id) {
         const existingConv = await db.conversations.get(incomingMsg.conversation_id);
         const sender = incomingMsg.client_username;
@@ -55,7 +68,7 @@ export const startSyncManager = (socket) => {
           conversation_id: incomingMsg.conversation_id,
           participant_username: existingConv?.participant_username || sender,
           participant_name: existingConv?.participant_name || sender,
-          last_message: incomingMsg.content,
+          last_message: encryptedContent,
           updated_at: incomingMsg.created_at || Date.now()
         });
       }

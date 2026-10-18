@@ -7,6 +7,7 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import 'dotenv/config';
 
 const { Pool } = pg;
@@ -21,6 +22,46 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_change_in_productio
 if (!process.env.JWT_SECRET) {
     console.warn("WARNING: JWT_SECRET is not set in environment variables. Using default fallback.");
 }
+
+// AES-256-GCM key derived for securing data at rest in PostgreSQL
+const DB_ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY
+    ? crypto.createHash('sha256').update(process.env.DB_ENCRYPTION_KEY).digest()
+    : crypto.createHash('sha256').update(JWT_SECRET).digest();
+
+const encryptAtRest = (plainText) => {
+    if (!plainText) return plainText;
+    try {
+        const iv = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv('aes-256-gcm', DB_ENCRYPTION_KEY, iv);
+        let encrypted = cipher.update(plainText, 'utf8', 'hex');
+        encrypted += cipher.final('hex');
+        const authTag = cipher.getAuthTag().toString('hex');
+        return `enc:v1:${iv.toString('hex')}:${authTag}:${encrypted}`;
+    } catch (err) {
+        console.error("Encryption at rest error:", err);
+        return plainText;
+    }
+};
+
+const decryptAtRest = (cipherText) => {
+    if (!cipherText || typeof cipherText !== 'string' || !cipherText.startsWith('enc:v1:')) {
+        return cipherText;
+    }
+    try {
+        const parts = cipherText.split(':');
+        const ivHex = parts[2];
+        const authTagHex = parts[3];
+        const encrypted = parts[4];
+        const decipher = crypto.createDecipheriv('aes-256-gcm', DB_ENCRYPTION_KEY, Buffer.from(ivHex, 'hex'));
+        decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
+        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (err) {
+        console.error("Decryption at rest error:", err);
+        return cipherText;
+    }
+};
 
 const pool = new Pool({
     user: process.env.DB_USER,
@@ -301,7 +342,7 @@ app.get('/api/conversations', authenticateToken, async (req, res) => {
             return {
                 conversation_id: row.conversation_id,
                 participant: otherUser,
-                last_message: row.content,
+                last_message: decryptAtRest(row.content),
                 updated_at: row.created_at
             };
         }));
@@ -339,13 +380,47 @@ app.get('/api/messages/:conversationId', authenticateToken, async (req, res) => 
             [conversationId]
         );
 
+        const decryptedMessages = result.rows.map(m => ({
+            ...m,
+            content: decryptAtRest(m.content)
+        }));
+
         return res.json({
             success: true,
-            messages: result.rows
+            messages: decryptedMessages
         });
     } catch (err) {
         console.error('Fetch messages error:', err);
         return res.status(500).json({ success: false, message: 'Server error fetching messages' });
+    }
+});
+
+// Fetch all messages across all user's conversations (for restoring all chats on login)
+app.get('/api/messages/sync-all', authenticateToken, async (req, res) => {
+    try {
+        const currentUsername = req.user.username.toLowerCase();
+
+        const result = await pool.query(
+            `SELECT client_msg_id, conversation_id, sender_username, content, created_at
+             FROM messages
+             WHERE conversation_id LIKE 'dm:%'
+               AND $1 = ANY(string_to_array(LOWER(conversation_id), ':'))
+             ORDER BY created_at ASC;`,
+            [currentUsername]
+        );
+
+        const decryptedMessages = result.rows.map(m => ({
+            ...m,
+            content: decryptAtRest(m.content)
+        }));
+
+        return res.json({
+            success: true,
+            messages: decryptedMessages
+        });
+    } catch (err) {
+        console.error('Sync all messages error:', err);
+        return res.status(500).json({ success: false, message: 'Server error during message sync' });
     }
 });
 
@@ -401,6 +476,9 @@ io.on('connection', (socket) => {
         console.log(`Private message from @${authenticatedUsername} to @${recipient || 'unknown'}:`, enrichedMessage.content);
 
         try {
+            // Encrypt message content at rest before writing to PostgreSQL
+            const encryptedContent = encryptAtRest(enrichedMessage.content);
+
             await pool.query(
                 `INSERT INTO messages (client_msg_id, conversation_id, sender_username, content, created_at)
                  VALUES ($1, $2, $3, $4, $5)
@@ -409,12 +487,12 @@ io.on('connection', (socket) => {
                     enrichedMessage.client_msg_id,
                     enrichedMessage.conversation_id,
                     authenticatedUsername,
-                    enrichedMessage.content,
+                    encryptedContent,
                     enrichedMessage.created_at
                 ]
             );
 
-            console.log(`Saved to Postgres: ${enrichedMessage.client_msg_id}`);
+            console.log(`Saved encrypted to Postgres: ${enrichedMessage.client_msg_id}`);
 
             if (typeof callback === 'function') {
                 callback({
