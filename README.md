@@ -277,7 +277,7 @@ This is the most technically complex feature I'll add, and honestly the one I'm 
 
 Built by **Aryan Kumar** as a full-stack portfolio project.
 
-If you're a recruiter reading this — thanks for making it this far! I built this entirely from scratch, made real architectural decisions, and learned a ton along the way. Happy to talk through any of it.
+Thanks for making it this far! I built this entirely from scratch, made real architectural decisions, and learned a ton along the way. Happy to talk through any of it.
 
 - GitHub: [https://github.com/Aryan-Kumar7369]
 - LinkedIn: [https://www.linkedin.com/in/aryan-kumar-ak/]
